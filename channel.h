@@ -142,17 +142,15 @@ void doco(State state, T... states) {
 }
 
 void worker() {
-	while(true) {		
-		unique_lock<mutex> lock(mtx);
-		cv.wait(lock, [&]{ return active_processes.size() > 0 || nbRunning == 0; });
+	while(true) {
+		mtx.lock();
 		
 		if(active_processes.size() > 0) {
 			nbRunning++;
 			State* proc = active_processes.front();
 			active_processes.pop_front();
 			
-			lock.unlock();
-			cv.notify_all();
+			mtx.unlock();
 			
 			proc->continuation(proc);
 			
@@ -165,7 +163,8 @@ void worker() {
 				mtx.unlock();
 			}
 		}
-		else {
+		else if(nbRunning == 0) {
+			mtx.unlock();
 			break;
 		}
 	}
