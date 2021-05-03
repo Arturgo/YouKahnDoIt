@@ -20,7 +20,6 @@ struct State;
 
 struct Channel {
 	mutex mtx;
-	condition_variable cv;
 	
 	size_t maxSize = 1024;
 	
@@ -83,21 +82,14 @@ T put_ready(Channel* channel) {
 
 template<typename T>
 void put(T obj, Channel* channel) {
+	channel->mtx.lock();
+	
 	char* ptr = (char*)&obj;
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
-		put<char>(ptr[oct], channel);
+		channel->buffer.push_front(ptr[oct]);
 	}
-}
-
-template<>
-void put<char>(char obj, Channel* channel) {
-	unique_lock<mutex> lock(channel->mtx);
-	channel->cv.wait(lock, [channel]{ return channel->buffer.size() < channel->maxSize; });
 	
-	channel->buffer.push_front(obj);
-	
-	lock.unlock();
-	channel->cv.notify_all();
+	channel->mtx.unlock();
 }
 
 // GET ANY OBJECT FROM CHANNEL
@@ -114,24 +106,16 @@ template<typename T>
 T get(Channel* channel) {
 	T obj;
 	
+	channel->mtx.lock();
+	
 	char* ptr = (char*)&obj;
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
-		ptr[oct] = get<char>(channel);
+		ptr[oct] = channel->buffer.back();
+		channel->buffer.pop_back();
 	} 
 	
-	return obj;
-}
-
-template<>
-char get<char>(Channel* channel) {
-	unique_lock<mutex> lock(channel->mtx);
-	channel->cv.wait(lock, [channel]{ return channel->buffer.size() > 0; });
+	channel->mtx.unlock();
 	
-	char obj = channel->buffer.back();
-	channel->buffer.pop_back();
-	
-	lock.unlock();
-	channel->cv.notify_all();
 	return obj;
 }
 
@@ -166,8 +150,6 @@ void worker() {
 			nbRunning++;
 			State* proc = active_processes.front();
 			active_processes.pop_front();
-			
-			//cout << "PACO " << active_processes.size() << endl;
 			
 			lock.unlock();
 			cv.notify_all();
