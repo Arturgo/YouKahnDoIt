@@ -8,6 +8,7 @@
 #include <map>
 #include <functional>
 #include <list>
+#include <cassert>
 #include <condition_variable>
 using namespace std;
 
@@ -122,7 +123,6 @@ T get(Channel* channel) {
 // KAHN NETWORK IMPLEMENTATION FOR PARALLELISM
 
 mutex mtx;
-condition_variable cv;
 int nbRunning;
 
 deque<State*> active_processes;
@@ -130,7 +130,9 @@ deque<State*> active_processes;
 void add_process(State state) {
 	State* cpy = new State();
 	*cpy = state;
+	mtx.lock();
 	active_processes.push_back(cpy);
+	mtx.unlock();
 }
 
 void doco() {}
@@ -149,7 +151,6 @@ void worker() {
 			nbRunning++;
 			State* proc = active_processes.front();
 			active_processes.pop_front();
-			
 			mtx.unlock();
 			
 			proc->continuation(proc);
