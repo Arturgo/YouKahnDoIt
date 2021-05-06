@@ -19,17 +19,18 @@ struct State;
 
 // CHANNEL DEFINITION : PARALLEL
 
+struct State ;
 struct Channel {
 	mutex mtx;
-	
 	size_t maxSize = 1024;
-	
+	State * entree, sortie;
 	deque<char> buffer;
+	bool estSature=false;
 };
 
 // STATE DEFINITION : NOT PARALLEL
 
-struct State {	
+struct State {
 	vector<char> memory;
 	
 	// DUE TO VIRTUAL MEMORY, EVERY COMPUTER MUST RUN THE SAME BINARY !
@@ -120,12 +121,24 @@ T get(Channel* channel) {
 	return obj;
 }
 
+//Pour connaitre l'état d'un état
+
+bool pret(State * state){
+	return state->inputs
+}
+
+
 // KAHN NETWORK IMPLEMENTATION FOR PARALLELISM
 
 mutex mtx;
 int nbRunning;
 
+State *sortieFinale;
 deque<State*> active_processes;
+
+void define_output(State *sortie){
+	sortieFinale=sortie;
+}
 
 void add_process(State state) {
 	State* cpy = new State();
