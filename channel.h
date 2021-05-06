@@ -42,6 +42,9 @@ struct State {
 	State(vector<Channel*> _inputs, vector<Channel*> _outputs, function<void(State*)> _continuation, size_t _memory_size = 0) {
 		inputs = _inputs;
 		outputs = _outputs;
+		for(auto el :inputs)el->sortie=this;
+		for(auto el :outputs)el->entree=this;
+		
 		continuation = _continuation;
 		memory.resize(_memory_size);
 	}
@@ -78,7 +81,6 @@ void put(size_t position, T obj, State* state) {
 template<typename T>
 T put_ready(Channel* channel) {
 	channel->mtx.lock();
-	channel->estSature=false;
 	bool estOk = channel->buffer.size() + sizeof(T) < channel->maxSize;
 	channel->mtx.unlock();
 	return estOk;
@@ -86,6 +88,7 @@ T put_ready(Channel* channel) {
 
 template<typename T>
 void put(T obj, Channel* channel) {
+	channel->estSature=false;
 	channel->mtx.lock();
 	
 	char* ptr = (char*)&obj;
@@ -157,6 +160,8 @@ State * new_process(vector<Channel*> inputs,vector<Channel*> outputs, function<v
 	retour->inputs=inputs;
 	retour->outputs=outputs;
 	retour->continuation=continuation;
+	for(auto el :retour->inputs)el->sortie=retour;
+	for(auto el :retour->outputs)el->entree=retour;
 	return retour;
 }
 void add_process(State *state) {
