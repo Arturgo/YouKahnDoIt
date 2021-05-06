@@ -37,11 +37,10 @@ void Sift(State* state) {
 		
 		Channel* q = new Channel();
 
-		State filter({state->inputs[0]}, {q}, Filter, sizeof(int));
-		put<int>(0, prime, &filter);
-		
+		State *filter= new_process({state->inputs[0]}, {q}, Filter);
+		put<int>(0, prime, filter);
 		doco(
-			State({q}, {state->outputs[0]}, Sift),
+			new_process({q},{state->outputs[0]} , Sift),
 			filter
 		);
 		
@@ -59,12 +58,14 @@ int main() {
 	State integers({}, {&q1}, Integers, sizeof(size_t));
 	put<int>(0, 2, &integers);
 	
+	State debut=State({&q1}, {&q2}, Sift), output =State({&q2}, {}, Output);
 	doco(
-		integers, 
-		State({&q1}, {&q2}, Sift),
-		State({&q2}, {}, Output)
+		&integers, 
+		&debut,
+		&output
 	);
 	
-	run(2);
+	define_output(&output);
+	run(1);
 	return 0;
 }

@@ -23,11 +23,12 @@ struct State ;
 struct Channel {
 	mutex mtx;
 	size_t maxSize = 1024;
-	State * entree, sortie;
+	State * entree, *sortie;
 	deque<char> buffer;
 	bool estSature=false;
 };
 
+deque<Channel*>channelSaturation; //on conserve les channels qui saturent le réseau
 // STATE DEFINITION : NOT PARALLEL
 
 struct State {
@@ -77,6 +78,7 @@ void put(size_t position, T obj, State* state) {
 template<typename T>
 T put_ready(Channel* channel) {
 	channel->mtx.lock();
+	channel->estSature=false;
 	bool estOk = channel->buffer.size() + sizeof(T) < channel->maxSize;
 	channel->mtx.unlock();
 	return estOk;
@@ -101,7 +103,13 @@ T get_ready(Channel* channel) {
 	channel->mtx.lock();
 	bool estOk = channel->buffer.size() >= sizeof(T);
 	channel->mtx.unlock();
-	return estOk;
+	if(estOk)
+		return true;
+	else{
+		channel->estSature=true;
+		channelSaturation.push_back(channel);
+		return false;
+	}
 }
 
 template<typename T>
@@ -124,7 +132,10 @@ T get(Channel* channel) {
 //Pour connaitre l'état d'un état
 
 bool pret(State * state){
-	return state->inputs
+	for(auto el : state->inputs){
+		if(el->estSature)return false;
+	}
+	return true;
 }
 
 
@@ -138,20 +149,26 @@ deque<State*> active_processes;
 
 void define_output(State *sortie){
 	sortieFinale=sortie;
+	active_processes.push_back(sortieFinale);
 }
 
-void add_process(State state) {
-	State* cpy = new State();
-	*cpy = state;
+State * new_process(vector<Channel*> inputs,vector<Channel*> outputs, function<void(State*)> continuation ){
+	State *retour = new State;
+	retour->inputs=inputs;
+	retour->outputs=outputs;
+	retour->continuation=continuation;
+	return retour;
+}
+void add_process(State *state) {
 	mtx.lock();
-	active_processes.push_back(cpy);
+	//active_processes.push_back(state);
 	mtx.unlock();
 }
 
 void doco() {}
 
 template<typename ...T>
-void doco(State state, T... states) {
+void doco(State *state, T... states) {
 	add_process(state);
 	doco(states...);	
 }
@@ -160,8 +177,31 @@ void worker() {
 	while(true) {
 		mtx.lock();
 		
-		if(active_processes.size() > 0) {
+		if(channelSaturation.size() > 0){
+			nbRunning++;		
+			Channel *enCours=channelSaturation.front();
+			channelSaturation.pop_front();
+			mtx.unlock();
+
+			State* proc = enCours->entree;
+			
+			for(int i=0;(i<10||enCours->estSature)&&pret(proc);i++){
+				proc->continuation(proc);
+				proc = enCours->entree;
+			}
+			if(proc->continuation != nullptr) {
+				mtx.lock();
+				
+				active_processes.push_back(proc);
+				nbRunning--;
+				
+				mtx.unlock();
+			}
+		}		
+		
+		else if(active_processes.size() > 0) {
 			nbRunning++;
+			
 			State* proc = active_processes.front();
 			active_processes.pop_front();
 			mtx.unlock();
