@@ -22,7 +22,6 @@ struct State;
 struct State ;
 struct Channel {
 	mutex mtx;
-	size_t maxSize = 1024;
 	State * entree, *sortie;
 	deque<char> buffer;
 	bool estSature=false;
@@ -35,11 +34,11 @@ struct State {
 	vector<char> memory;
 	
 	// DUE TO VIRTUAL MEMORY, EVERY COMPUTER MUST RUN THE SAME BINARY !
-	function<void(State*)> continuation;
+	function<void(State*, int)> continuation;
 	
 	vector<Channel*> inputs, outputs;
 	
-	State(vector<Channel*> _inputs, vector<Channel*> _outputs, function<void(State*)> _continuation, size_t _memory_size = 0) {
+	State(vector<Channel*> _inputs, vector<Channel*> _outputs, function<void(State*, int)> _continuation, size_t _memory_size = 0) {
 		inputs = _inputs;
 		outputs = _outputs;
 		for(auto el :inputs)el->sortie=this;
@@ -77,14 +76,6 @@ void put(size_t position, T obj, State* state) {
 }
 
 // PUT ANY OBJECT TO CHANNEL
-
-template<typename T>
-T put_ready(Channel* channel) {
-	channel->mtx.lock();
-	bool estOk = channel->buffer.size() + sizeof(T) < channel->maxSize;
-	channel->mtx.unlock();
-	return estOk;
-}
 
 template<typename T>
 void put(T obj, Channel* channel) {
@@ -146,16 +137,17 @@ bool pret(State * state){
 
 mutex mtx;
 int nbRunning;
+int nbProcess;
 
 State *sortieFinale;
 deque<State*> active_processes;
+deque<State*> processus_perso[1000];
 
 void define_output(State *sortie){
 	sortieFinale=sortie;
-	active_processes.push_back(sortieFinale);
 }
 
-State * new_process(vector<Channel*> inputs,vector<Channel*> outputs, function<void(State*)> continuation ){
+State * new_process(vector<Channel*> inputs,vector<Channel*> outputs, function<void(State*,int)> continuation ){
 	State *retour = new State;
 	retour->inputs=inputs;
 	retour->outputs=outputs;
@@ -164,9 +156,12 @@ State * new_process(vector<Channel*> inputs,vector<Channel*> outputs, function<v
 	for(auto el :retour->outputs)el->entree=retour;
 	return retour;
 }
-void add_process(State *state) {
+void add_process(State *state,int num=-1) {
 	mtx.lock();
-	//active_processes.push_back(state);
+	if(num==-1||nbRunning!=nbProcess)
+		active_processes.push_back(state);
+	else
+		processus_perso[num].push_back(state);
 	mtx.unlock();
 }
 
@@ -178,50 +173,34 @@ void doco(State *state, T... states) {
 	doco(states...);	
 }
 
-void worker() {
+void worker(int num) {
 	while(true) {
+		//printf("%d %d\n", active_processes.size(), processus_perso[0].size());
 		mtx.lock();
 		
-		if(channelSaturation.size() > 0){
-			nbRunning++;		
-			Channel *enCours=channelSaturation.front();
-			channelSaturation.pop_front();
+		if(processus_perso[num].size()>0 || active_processes.size() > 0) {
+			nbRunning++;
+			State* proc;
+			if(processus_perso[num].size()>0){
+				proc=processus_perso[num].front();
+				processus_perso[num].pop_front();
+			}
+			else{
+				proc = active_processes.front();
+				active_processes.pop_front();
+			}
 			mtx.unlock();
 
-			State* proc = enCours->entree;
-			
-			for(int i=0;(i<10||enCours->estSature)&&pret(proc);i++){
-				proc->continuation(proc);
-				proc = enCours->entree;
+			while(pret(proc)){
+				proc->continuation(proc,num);
+				if(proc->continuation == nullptr)break;
 			}
-			if(proc->continuation != nullptr) {
-				mtx.lock();
-				
-				active_processes.push_back(proc);
-				nbRunning--;
-				
-				mtx.unlock();
+			if(proc->continuation != nullptr){
+				processus_perso[num].push_back(proc);
 			}
+
+			nbRunning--;
 		}		
-		
-		else if(active_processes.size() > 0) {
-			nbRunning++;
-			
-			State* proc = active_processes.front();
-			active_processes.pop_front();
-			mtx.unlock();
-			
-			proc->continuation(proc);
-			
-			if(proc->continuation != nullptr) {
-				mtx.lock();
-				
-				active_processes.push_back(proc);
-				nbRunning--;
-				
-				mtx.unlock();
-			}
-		}
 		else if(nbRunning == 0) {
 			mtx.unlock();
 			break;
@@ -233,10 +212,11 @@ void run(size_t nbWorkers = 1) {
 	vector<thread> workers;
 	
 	nbRunning = 0;
+	nbProcess=nbWorkers;
 	for(size_t iWorker = 0;iWorker < nbWorkers;iWorker++) {
-		workers.push_back(thread(worker));
+		workers.push_back(thread(worker, iWorker));
 	}
-	
+
 	for(auto it = workers.begin();it != workers.end();it++) {
 		it->join();
 	}

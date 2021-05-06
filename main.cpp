@@ -4,23 +4,21 @@ using namespace std;
 
 mutex m;
 
-void Output(State* state) {
+void Output(State* state, int num) {
 	if(get_ready<int>(state->inputs[0]))
 		cout << get<int>(state->inputs[0]) << endl;
 }
 
-void Integers(State* state) {
+void Integers(State* state, int num) {
 	int value = get<int>(0, state);
 	
-	if(put_ready<int>(state->outputs[0])) {		
 		put<int>(value, state->outputs[0]);
 		
 		put<int>(0, value + 1, state);
-	}
 }
 
-void Filter(State* state) {
-	if(get_ready<int>(state->inputs[0]) && put_ready<int>(state->outputs[0])) {
+void Filter(State* state, int num) {
+	if(get_ready<int>(state->inputs[0])) {
 		int value = get<int>(state->inputs[0]);
 		int prime = get<int>(0, state);
 		
@@ -30,8 +28,8 @@ void Filter(State* state) {
 	}
 }
 
-void Sift(State* state) {
-	if(get_ready<int>(state->inputs[0]) && put_ready<int>(state->outputs[0])) {
+void Sift(State* state, int num) {
+	if(get_ready<int>(state->inputs[0])) {
 		int prime = get<int>(state->inputs[0]);
 		put<int>(prime, state->outputs[0]);
 		
