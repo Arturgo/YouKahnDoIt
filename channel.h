@@ -19,31 +19,25 @@ struct State;
 
 // CHANNEL DEFINITION : PARALLEL
 
-struct State ;
 struct Channel {
 	mutex mtx;
-	size_t maxSize = 1024;
-	State * entree, *sortie;
 	deque<char> buffer;
-	bool estSature=false;
 };
 
-deque<Channel*>channelSaturation; //on conserve les channels qui saturent le réseau
 // STATE DEFINITION : NOT PARALLEL
 
 struct State {
-	vector<char> memory;
+	map<string, deque<char>> memory;
 	
 	// DUE TO VIRTUAL MEMORY, EVERY COMPUTER MUST RUN THE SAME BINARY !
 	function<void(State*)> continuation;
 	
 	vector<Channel*> inputs, outputs;
 	
-	State(vector<Channel*> _inputs, vector<Channel*> _outputs, function<void(State*)> _continuation, size_t _memory_size = 0) {
+	State(vector<Channel*> _inputs, vector<Channel*> _outputs, function<void(State*)> _continuation) {
 		inputs = _inputs;
 		outputs = _outputs;
 		continuation = _continuation;
-		memory.resize(_memory_size);
 	}
 	
 	State() {}
@@ -52,12 +46,12 @@ struct State {
 // GET ANY OBJECT FROM MEMORY
 
 template<typename T>
-T get(size_t position, State* state) {
+T get(string name, State* state) {
 	T obj;
 	
 	char* ptr = (char*)&obj;
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
-		ptr[oct] = state->memory[position + oct];
+		ptr[oct] = state->memory[name][oct];
 	} 
 	
 	return obj;
@@ -66,23 +60,47 @@ T get(size_t position, State* state) {
 // PUT ANY OBJECT TO MEMORY
 
 template<typename T>
-void put(size_t position, T obj, State* state) {
+void put(string name, T obj, State* state) {
 	char* ptr = (char*)&obj;
+	
+	state->memory[name].clear();
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
-		state->memory[position + oct] = ptr[oct];
+		state->memory[name].push_back(ptr[oct]);
 	}
 }
 
-// PUT ANY OBJECT TO CHANNEL
+template<typename T>
+void push(string name, T obj, State* state) {
+	char* ptr = (char*)&obj;
+	
+	for(size_t oct = 0;oct < sizeof(T);oct++) {
+		state->memory[name].push_back(ptr[oct]);
+	}
+}
 
 template<typename T>
-T put_ready(Channel* channel) {
-	channel->mtx.lock();
-	channel->estSature=false;
-	bool estOk = channel->buffer.size() + sizeof(T) < channel->maxSize;
-	channel->mtx.unlock();
-	return estOk;
+void push_front(string name, T obj, State* state) {
+	char* ptr = (char*)&obj;
+	
+	for(size_t oct = 0;oct < sizeof(T);oct++) {
+		state->memory[name].push_front(ptr[sizeof(T) - oct - 1]);
+	}
 }
+
+template<typename T>
+T pop(string name, State* state) {
+	T obj;
+	
+	char* ptr = (char*)&obj;
+	for(size_t oct = 0;oct < sizeof(T);oct++) {
+		ptr[oct] = state->memory[name].front();
+		state->memory[name].pop_front();
+	}
+	
+	return obj;
+}
+
+// PUT ANY OBJECT TO CHANNEL
 
 template<typename T>
 void put(T obj, Channel* channel) {
@@ -99,17 +117,11 @@ void put(T obj, Channel* channel) {
 // GET ANY OBJECT FROM CHANNEL
 
 template<typename T>
-T get_ready(Channel* channel) {
+bool get_ready(Channel* channel) {
 	channel->mtx.lock();
 	bool estOk = channel->buffer.size() >= sizeof(T);
 	channel->mtx.unlock();
-	if(estOk)
-		return true;
-	else{
-		channel->estSature=true;
-		channelSaturation.push_back(channel);
-		return false;
-	}
+	return estOk;
 }
 
 template<typename T>
@@ -129,46 +141,25 @@ T get(Channel* channel) {
 	return obj;
 }
 
-//Pour connaitre l'état d'un état
-
-bool pret(State * state){
-	for(auto el : state->inputs){
-		if(el->estSature)return false;
-	}
-	return true;
-}
-
-
 // KAHN NETWORK IMPLEMENTATION FOR PARALLELISM
 
 mutex mtx;
 int nbRunning;
 
-State *sortieFinale;
 deque<State*> active_processes;
 
-void define_output(State *sortie){
-	sortieFinale=sortie;
-	active_processes.push_back(sortieFinale);
-}
-
-State * new_process(vector<Channel*> inputs,vector<Channel*> outputs, function<void(State*)> continuation ){
-	State *retour = new State;
-	retour->inputs=inputs;
-	retour->outputs=outputs;
-	retour->continuation=continuation;
-	return retour;
-}
-void add_process(State *state) {
+void add_process(State state) {
+	State* cpy = new State();
+	*cpy = state;
 	mtx.lock();
-	//active_processes.push_back(state);
+	active_processes.push_back(cpy);
 	mtx.unlock();
 }
 
 void doco() {}
 
 template<typename ...T>
-void doco(State *state, T... states) {
+void doco(State state, T... states) {
 	add_process(state);
 	doco(states...);	
 }
@@ -177,31 +168,8 @@ void worker() {
 	while(true) {
 		mtx.lock();
 		
-		if(channelSaturation.size() > 0){
-			nbRunning++;		
-			Channel *enCours=channelSaturation.front();
-			channelSaturation.pop_front();
-			mtx.unlock();
-
-			State* proc = enCours->entree;
-			
-			for(int i=0;(i<10||enCours->estSature)&&pret(proc);i++){
-				proc->continuation(proc);
-				proc = enCours->entree;
-			}
-			if(proc->continuation != nullptr) {
-				mtx.lock();
-				
-				active_processes.push_back(proc);
-				nbRunning--;
-				
-				mtx.unlock();
-			}
-		}		
-		
-		else if(active_processes.size() > 0) {
+		if(active_processes.size() > 0) {
 			nbRunning++;
-			
 			State* proc = active_processes.front();
 			active_processes.pop_front();
 			mtx.unlock();
@@ -215,6 +183,9 @@ void worker() {
 				nbRunning--;
 				
 				mtx.unlock();
+			}
+			else {
+				nbRunning--;
 			}
 		}
 		else if(nbRunning == 0) {
