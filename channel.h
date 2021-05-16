@@ -21,6 +21,7 @@ struct State;
 
 struct Channel {
 	mutex mtx;
+	State *entree, *sortie;
 	deque<char> buffer;
 };
 
@@ -145,8 +146,10 @@ T get(Channel* channel) {
 
 mutex mtx;
 int nbRunning;
+int nbProcess;
 
 deque<State*> active_processes;
+deque<State*> processus_perso[1000];
 
 void add_process(State state) {
 	State* cpy = new State();
@@ -164,8 +167,9 @@ void doco(State state, T... states) {
 	doco(states...);	
 }
 
-void worker() {
+void worker(int num) {
 	while(true) {
+		//printf("%d %d\n", active_processes.size(), processus_perso[0].size());
 		mtx.lock();
 		
 		if(active_processes.size() > 0) {
@@ -199,10 +203,11 @@ void run(size_t nbWorkers = 1) {
 	vector<thread> workers;
 	
 	nbRunning = 0;
+	nbProcess=nbWorkers;
 	for(size_t iWorker = 0;iWorker < nbWorkers;iWorker++) {
-		workers.push_back(thread(worker));
+		workers.push_back(thread(worker, iWorker));
 	}
-	
+
 	for(auto it = workers.begin();it != workers.end();it++) {
 		it->join();
 	}

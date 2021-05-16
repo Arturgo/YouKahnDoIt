@@ -65,7 +65,7 @@ void Load(State* st) {
 		put<size_t>("size", sz, st);
 		put<size_t>("col", 0, st);
 		put<size_t>("lig", 0, st);
-		
+
 		st->continuation = Load_loop;
 	}
 }
