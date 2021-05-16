@@ -5,7 +5,7 @@ using namespace std;
 
 mutex m;
 
-const int P2 = 7;
+const int P2 = 9;
 const int SIZE = (1 << P2);
 
 // randomly generate two matrixes of size SIZE
@@ -104,6 +104,7 @@ void Output(State* st) {
 
 // Slow multiplication of two matrixes
 void SlowMultiply(State* st) {
+	cerr << "SLOW" << endl;
 	size_t sz = get<size_t>("size", st);
 	size_t idA = pop<size_t>("mat_id", st);
 	size_t idB = pop<size_t>("mat_id", st);
@@ -220,7 +221,7 @@ void FastMultiply(State* st) {
 	st->continuation = pop<function<void(State*)>>("f_ptr", st);
 }
 
-void FastMultiply_merge(State* st) {
+void FastMultiply_merge(State* st) {	
 	size_t sz = get<size_t>("tsize", st);
 	size_t idC = pop<size_t>("mat_id", st);
 	
@@ -290,6 +291,6 @@ int main() {
 		st
 	);
 	
-	run(1);
+	run(8);
 	return 0;
 }

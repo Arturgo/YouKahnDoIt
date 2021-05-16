@@ -149,7 +149,6 @@ int nbRunning;
 int nbProcess;
 
 deque<State*> active_processes;
-deque<State*> processus_perso[1000];
 
 void add_process(State state) {
 	State* cpy = new State();
@@ -169,10 +168,12 @@ void doco(State state, T... states) {
 
 void worker(int num) {
 	while(true) {
-		//printf("%d %d\n", active_processes.size(), processus_perso[0].size());
-		mtx.lock();
-		
 		if(active_processes.size() > 0) {
+			mtx.lock();
+			if(active_processes.empty()) {
+				mtx.unlock();
+				continue;
+			}
 			nbRunning++;
 			State* proc = active_processes.front();
 			active_processes.pop_front();
@@ -180,20 +181,24 @@ void worker(int num) {
 			
 			proc->continuation(proc);
 			
+			mtx.lock();
 			if(proc->continuation != nullptr) {
-				mtx.lock();
-				
 				active_processes.push_back(proc);
 				nbRunning--;
-				
-				mtx.unlock();
 			}
 			else {
 				nbRunning--;
 			}
+			mtx.unlock();
 		}
 		else if(nbRunning == 0) {
+			mtx.lock();
+			if(nbRunning != 0 || !active_processes.empty()) {
+				mtx.unlock();
+				continue;
+			}
 			mtx.unlock();
+			
 			break;
 		}
 	}
@@ -203,7 +208,7 @@ void run(size_t nbWorkers = 1) {
 	vector<thread> workers;
 	
 	nbRunning = 0;
-	nbProcess=nbWorkers;
+	nbProcess = nbWorkers;
 	for(size_t iWorker = 0;iWorker < nbWorkers;iWorker++) {
 		workers.push_back(thread(worker, iWorker));
 	}
