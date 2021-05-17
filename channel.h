@@ -23,6 +23,7 @@ struct Channel {
 	mutex mtx;
 	State *entree, *sortie;
 	deque<char> buffer;
+	bool estsature=false;
 };
 
 // STATE DEFINITION : NOT PARALLEL
@@ -106,7 +107,7 @@ T pop(string name, State* state) {
 template<typename T>
 void put(T obj, Channel* channel) {
 	channel->mtx.lock();
-	
+	channel->estsature=false;
 	char* ptr = (char*)&obj;
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
 		channel->buffer.push_front(ptr[oct]);
@@ -121,6 +122,8 @@ template<typename T>
 bool get_ready(Channel* channel) {
 	channel->mtx.lock();
 	bool estOk = channel->buffer.size() >= sizeof(T);
+	if(!estOk)
+		channel->estsature=true;
 	channel->mtx.unlock();
 	return estOk;
 }
@@ -141,6 +144,13 @@ T get(Channel* channel) {
 	
 	return obj;
 }
+
+//VERIFIE QU'ON PEUT CONTINUER A EXECUTER
+bool peut_avancer(State *state){
+	for(auto el : state->inputs)if(el->estsature)return false;
+	return true;
+}
+
 
 // KAHN NETWORK IMPLEMENTATION FOR PARALLELISM
 
@@ -179,7 +189,11 @@ void worker(int num) {
 			active_processes.pop_front();
 			mtx.unlock();
 			
-			proc->continuation(proc);
+			while(peut_avancer(proc)){
+				proc->continuation(proc);
+				if(proc->continuation == nullptr)break;
+				//printf("%d\n", proc->continuation);
+			}
 			
 			mtx.lock();
 			if(proc->continuation != nullptr) {
