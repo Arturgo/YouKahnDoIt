@@ -237,6 +237,11 @@ void push(string name, T obj, State* state) {
 	}
 }
 
+template<>
+void push<void (*)(State*)>(string name, void (*obj)(State*), State* state) {
+	push<size_t>(name, (size_t)obj - (size_t)FPtrRef, state);
+}
+
 template<typename T>
 void push_front(string name, T obj, State* state) {
 	char* ptr = (char*)&obj;
@@ -244,6 +249,11 @@ void push_front(string name, T obj, State* state) {
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
 		state->memory[name].push_front(ptr[sizeof(T) - oct - 1]);
 	}
+}
+
+template<>
+void push_front<void (*)(State*)>(string name, void (*obj)(State*), State* state) {
+	push_front<size_t>(name, (size_t)obj - (size_t)FPtrRef, state);
 }
 
 template<typename T>
@@ -258,6 +268,12 @@ T pop(string name, State* state) {
 	
 	return obj;
 }
+
+template<>
+void (*pop<void (*)(State*)>(string name, State* state)) (State*) {
+	return (void (*)(State*))(pop<size_t>(name, state) + (size_t)FPtrRef);
+}
+
 
 // PUT ANY OBJECT TO CHANNEL
 

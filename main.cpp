@@ -9,7 +9,7 @@ mutex m;
 /***************************************/
 
 namespace matrices {
-	const int P2 = 9;
+	const int P2 = 8;
 	const int SIZE = (1 << P2);
 
 	// randomly generate two matrixes of size SIZE
@@ -108,6 +108,7 @@ namespace matrices {
 
 	// Slow multiplication of two matrixes
 	void SlowMultiply(State* st) {
+		cerr << "SLOW" << endl;
 		size_t sz = get<size_t>("size", st);
 		size_t idA = pop<size_t>("mat_id", st);
 		size_t idB = pop<size_t>("mat_id", st);
@@ -141,6 +142,7 @@ namespace matrices {
 
 	// Multiplication of two matrices using a divide and conquer approach
 	void FastMultiply(State* st) {
+		cerr << "SPLIT" << endl;
 		size_t sz = get<size_t>("size", st);
 		size_t idA = pop<size_t>("mat_id", st);
 		size_t idB = pop<size_t>("mat_id", st);
@@ -200,7 +202,7 @@ namespace matrices {
 					
 					State* nst = new State({in}, {out}, Load);
 					push<void (*)(State*)>("f_ptr", Load, nst);
-					if(sz <= 64)
+					if(sz <= 16)
 						push<void (*)(State*)>("f_ptr", SlowMultiply, nst);
 					else
 						push<void (*)(State*)>("f_ptr", FastMultiply, nst);
@@ -225,6 +227,7 @@ namespace matrices {
 	}
 
 	void FastMultiply_merge(State* st) {	
+		cerr << "MERGE" << endl;
 		size_t sz = get<size_t>("tsize", st);
 		size_t idC = pop<size_t>("mat_id", st);
 		
@@ -387,7 +390,7 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		primes::primes();
+		matrices::multiply();
 		threads.push_back(thread(run, 4));
 		
 		outputs_clients.push_back(nullptr);
