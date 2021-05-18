@@ -447,6 +447,8 @@ void send_state(Output* out, State* st) {
 	
 	for(size_t input : st->inputs) {
 		glob_mtx.lock();
+		channels[input]->mtx.lock();
+		deque<char> buffer = channels[input]->buffer;
 		delete channels[input];
 		channels.erase(input);
 		glob_mtx.unlock();
@@ -456,6 +458,11 @@ void send_state(Output* out, State* st) {
 		}
 		
 		put<size_t>(input, out);
+		put<size_t>(buffer.size(), out);
+		
+		for(char car : buffer) {
+			put<char>(car, out);
+		}
 	}
 	
 	flush(out);
@@ -492,9 +499,15 @@ State* recv_state(Input* in) {
 			owners[input] = 0;
 		}
 		
+		size_t inputSz = get<size_t>(in);
+		
 		glob_mtx.lock();
 		channels[input] = new Channel();
 		glob_mtx.unlock();
+		
+		for(size_t i = 0;i < inputSz;i++) {
+			channels[input]->buffer.push_back(get<char>(in));
+		}
 	}
 	
 	return st;
@@ -504,8 +517,10 @@ State* recv_state(Input* in) {
 
 void Integers(State* state) {
 	int value = get<int>("value", state);
-	put<int>(value, state->outputs[0]);
-	put<int>("value", value + 1, state);
+	if(value <= 10) {
+		put<int>(value, state->outputs[0]);
+		put<int>("value", value + 1, state);
+	}
 }
 
 void Out(State* state) {
@@ -531,7 +546,7 @@ void client_link(int fd, int iClient) {
 	put<int>("value", 0, st);
 	
 	State* st2 = new State({q}, {}, Out);
-	doco(*st);
+	doco(*st);	
 	
 	send_state(&out, st2);
 	
