@@ -108,7 +108,6 @@ namespace matrices {
 
 	// Slow multiplication of two matrixes
 	void SlowMultiply(State* st) {
-		cerr << "SLOW" << endl;
 		size_t sz = get<size_t>("size", st);
 		size_t idA = pop<size_t>("mat_id", st);
 		size_t idB = pop<size_t>("mat_id", st);

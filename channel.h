@@ -9,6 +9,7 @@
 #include <functional>
 #include <list>
 #include <cassert>
+#include <chrono>
 #include <iostream>
 #include <condition_variable>
 #include <sys/socket.h>
@@ -20,6 +21,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 using namespace std;
+using namespace std::chrono_literals;
 
 const int NB_ORDIS = 256;
 const int BUF_SIZE = 1024;
@@ -346,8 +348,6 @@ bool peut_avancer(State *state){
 // KAHN NETWORK IMPLEMENTATION FOR PARALLELISM
 
 mutex mtx;
-int nbRunning;
-int nbProcess;
 
 deque<State*> active_processes;
 
@@ -375,9 +375,11 @@ void worker(int num) {
 				mtx.unlock();
 				continue;
 			}
-			nbRunning++;
+			
 			State* proc = active_processes.front();
 			active_processes.pop_front();
+			
+			//if(rand() % 100 == 0) 
 			mtx.unlock();
 			
 			for(size_t i = 0;i < 50 && peut_avancer(proc);i++){
@@ -389,31 +391,18 @@ void worker(int num) {
 			mtx.lock();
 			if(proc->continuation != nullptr) {
 				active_processes.push_back(proc);
-				nbRunning--;
-			}
-			else {
-				nbRunning--;
 			}
 			mtx.unlock();
 		}
-		else if(nbRunning == 0) {
-			mtx.lock();
-			if(nbRunning != 0 || !active_processes.empty()) {
-				mtx.unlock();
-				continue;
-			}
-			mtx.unlock();
-			
-			sleep(1);
+		else {
+			this_thread::sleep_for(100ms);
 		}
 	}
 }
 
 void run(size_t nbWorkers = 1) {
 	vector<thread> workers;
-	
-	nbRunning = 0;
-	nbProcess = nbWorkers;
+
 	for(size_t iWorker = 0;iWorker < nbWorkers;iWorker++) {
 		workers.push_back(thread(worker, iWorker));
 	}
@@ -538,17 +527,10 @@ void client_link(int fd, int iClient) {
 	
 	outputs_clients.push_back(&out);
 	
+	out.mtx.lock();
 	put<size_t>(iClient, &out);
-	
-	size_t q = new_channel();
-	
-	State* st = new State({}, {q}, Integers);
-	put<int>("value", 0, st);
-	
-	State* st2 = new State({q}, {}, Out);
-	doco(*st);	
-	
-	send_state(&out, st2);
+	flush(&out);
+	out.mtx.unlock();
 	
 	do {
 		char car = get<char>(&in);
@@ -592,6 +574,10 @@ void client_link(int fd, int iClient) {
 				out->mtx.unlock();
 			}
 		}
+		else if(car == 'S') {
+			State* st = recv_state(&in);
+			doco(*st);
+		}
 	} while(true);
 }
 
@@ -604,10 +590,6 @@ void server_link(int fd) {
 	instance_id = get<size_t>(&in);
 	
 	cerr << "CLIENT " << instance_id << endl;
-	
-	State* st = recv_state(&in);
-	
-	doco(*st);
 	
 	do {
 		char car = get<char>(&in);
@@ -650,6 +632,10 @@ void server_link(int fd) {
 				
 				out->mtx.unlock();
 			}
+		}
+		else if(car == 'S') {
+			State* st = recv_state(&in);
+			doco(*st);
 		}
 	} while(true);
 }
