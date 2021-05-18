@@ -331,7 +331,10 @@ namespace primes {
 			
 			size_t q = new_channel();
 			
-			State filter({state->inputs[0]}, {q}, Filter);
+			size_t in = state->inputs[0];
+			state->inputs.pop_back();
+			
+			State filter({in}, {q}, Filter);
 			put<int>("prime", prime, &filter);
 			
 			doco(
@@ -384,7 +387,8 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		threads.push_back(thread(run, 8));
+		primes::primes();
+		threads.push_back(thread(run, 4));
 		
 		outputs_clients.push_back(nullptr);
 		
@@ -409,7 +413,7 @@ int main(int argc, char* argv[]) {
 		}
 		
 		threads.push_back(thread(server_link, fd));
-		run(8);
+		run(4);
 	}
 	return 0;
 }

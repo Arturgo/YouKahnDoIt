@@ -170,18 +170,17 @@ Output* output_serv;
 // Channel creation
 
 int new_channel() {
-	if(est_serveur) {
-		glob_mtx.lock();
-		size_t chan = instance_id + nbCreated * NB_ORDIS;
-		channels[chan] = new Channel();
+	glob_mtx.lock();
+	size_t chan = instance_id + nbCreated * NB_ORDIS;
+	channels[chan] = new Channel();
+	
+	if(est_serveur)
 		owners[chan] = 0;
-		nbCreated++;
-		glob_mtx.unlock();
-		return chan;
-	}
-	else {
-		//TODO
-	}
+	
+	nbCreated++;
+	glob_mtx.unlock();
+	
+	return chan;
 }
 
 // STATE DEFINITION : NOT PARALLEL
@@ -267,7 +266,6 @@ void put(T obj, size_t chan) {
 	glob_mtx.lock();
 	if(channels.count(chan)) {
 		Channel* channel = channels[chan];
-		glob_mtx.unlock();
 		
 		channel->mtx.lock();
 		
@@ -278,16 +276,18 @@ void put(T obj, size_t chan) {
 		}
 		
 		channel->mtx.unlock();
+		
+		glob_mtx.unlock();
 	}
 	else {
 		Output* out;
 		
-		if(est_serveur)
+		if(est_serveur && owners.count(chan) != 0)
 			out = outputs_clients[owners[chan]];
-		else
+		else if (!est_serveur)
 			out = output_serv;
-		
-		glob_mtx.unlock();
+		else
+			out = outputs_clients[1];
 		
 		out->mtx.lock();
 		
@@ -298,8 +298,9 @@ void put(T obj, size_t chan) {
 		flush(out);
 		
 		out->mtx.unlock();
+		
+		glob_mtx.unlock();
 	}
-	
 }
 
 // GET ANY OBJECT FROM CHANNEL
@@ -308,19 +309,21 @@ template<typename T>
 bool get_ready(size_t chan) {
 	glob_mtx.lock();
 	Channel* channel = channels[chan];
-	glob_mtx.unlock();
 	
 	channel->mtx.lock();
 	bool estOk = channel->buffer.size() >= sizeof(T);
 	if(!estOk)
-		channel->estsature=true;
+		channel->estsature = true;
 	channel->mtx.unlock();
+	
+	glob_mtx.unlock();
 	
 	return estOk;
 }
 
 template<typename T>
 T get(size_t chan) {
+	glob_mtx.lock();
 	Channel* channel = channels[chan];
 	
 	T obj;
@@ -334,14 +337,21 @@ T get(size_t chan) {
 	
 	channel->mtx.unlock();
 	
+	glob_mtx.unlock();
+	
 	return obj;
 }
 
 //VERIFIE QU'ON PEUT CONTINUER A EXECUTER
-bool peut_avancer(State *state){
-	for(size_t chan : state->inputs)
-		if(channels[chan]->estsature)
+bool peut_avancer(State *state) {
+	glob_mtx.lock();
+	for(size_t chan : state->inputs) {
+		if(channels[chan]->estsature) {
+			glob_mtx.unlock();
 			return false;
+		}
+	}
+	glob_mtx.unlock();
 	return true;
 }
 
@@ -367,56 +377,10 @@ void doco(State state, T... states) {
 	doco(states...);	
 }
 
-void worker(int num) {
-	while(true) {
-		if(active_processes.size() > 0) {
-			mtx.lock();
-			if(active_processes.empty()) {
-				mtx.unlock();
-				continue;
-			}
-			
-			State* proc = active_processes.front();
-			active_processes.pop_front();
-			
-			//if(rand() % 100 == 0) 
-			mtx.unlock();
-			
-			for(size_t i = 0;i < 50 && peut_avancer(proc);i++){
-				proc->continuation(proc);
-				if(proc->continuation == nullptr)break;
-				//printf("%d\n", proc->continuation);
-			}
-			
-			mtx.lock();
-			if(proc->continuation != nullptr) {
-				active_processes.push_back(proc);
-			}
-			mtx.unlock();
-		}
-		else {
-			this_thread::sleep_for(100ms);
-		}
-	}
-}
-
-void run(size_t nbWorkers = 1) {
-	vector<thread> workers;
-
-	for(size_t iWorker = 0;iWorker < nbWorkers;iWorker++) {
-		workers.push_back(thread(worker, iWorker));
-	}
-
-	for(auto it = workers.begin();it != workers.end();it++) {
-		it->join();
-	}
-}
-
 /* Send states through network */
 
-void send_state(Output* out, State* st) {
-	out->mtx.lock();
-	
+void send_state(Output* out, State* st) {	
+	put<char>('S', out);
 	put<size_t>((size_t)st->continuation - (size_t)FPtrRef, out);
 	
 	put<size_t>(st->memory.size(), out);
@@ -434,13 +398,11 @@ void send_state(Output* out, State* st) {
 	
 	put<size_t>(st->inputs.size(), out);
 	
-	for(size_t input : st->inputs) {
-		glob_mtx.lock();
+	for(size_t input : st->inputs) {		
 		channels[input]->mtx.lock();
 		deque<char> buffer = channels[input]->buffer;
 		delete channels[input];
 		channels.erase(input);
-		glob_mtx.unlock();
 		
 		if(est_serveur) {
 			owners[input] = out->owner;
@@ -453,10 +415,9 @@ void send_state(Output* out, State* st) {
 			put<char>(car, out);
 		}
 	}
+	delete st;
 	
 	flush(out);
-	
-	out->mtx.unlock();
 }
 
 State* recv_state(Input* in) {
@@ -484,39 +445,27 @@ State* recv_state(Input* in) {
 		size_t input = get<size_t>(in);
 		st->inputs.push_back(input);
 		
+		size_t inputSz = get<size_t>(in);
+		
+		glob_mtx.lock();
+		
 		if(est_serveur) {
 			owners[input] = 0;
 		}
 		
-		size_t inputSz = get<size_t>(in);
-		
-		glob_mtx.lock();
 		channels[input] = new Channel();
-		glob_mtx.unlock();
 		
 		for(size_t i = 0;i < inputSz;i++) {
 			channels[input]->buffer.push_back(get<char>(in));
 		}
+		
+		glob_mtx.unlock();
 	}
 	
 	return st;
 }
 
 /* New link */
-
-void Integers(State* state) {
-	int value = get<int>("value", state);
-	if(value <= 10) {
-		put<int>(value, state->outputs[0]);
-		put<int>("value", value + 1, state);
-	}
-}
-
-void Out(State* state) {
-	if(get_ready<int>(state->inputs[0])) {
-		cout << get<int>(state->inputs[0]) << endl;
-	}
-}
 
 void client_link(int fd, int iClient) {
 	cerr << "CONNEXION " << iClient << endl;
@@ -547,7 +496,6 @@ void client_link(int fd, int iClient) {
 			glob_mtx.lock();
 			if(channels.count(chan)) {
 				Channel* channel = channels[chan];
-				glob_mtx.unlock();
 				
 				channel->mtx.lock();
 				
@@ -556,9 +504,14 @@ void client_link(int fd, int iClient) {
 					channel->buffer.push_front(car);
 				
 				channel->mtx.unlock();
+				
+				glob_mtx.unlock();
 			}
 			else {
-				Output* out = outputs_clients[owners[chan]];
+				Output* out = outputs_clients[1];
+				if(owners.count(chan))
+					out = outputs_clients[owners[chan]];
+				
 				glob_mtx.unlock();
 				
 				out->mtx.lock();
@@ -606,7 +559,6 @@ void server_link(int fd) {
 			glob_mtx.lock();
 			if(channels.count(chan)) {
 				Channel* channel = channels[chan];
-				glob_mtx.unlock();
 				
 				channel->mtx.lock();
 				
@@ -615,10 +567,11 @@ void server_link(int fd) {
 					channel->buffer.push_front(car);
 				
 				channel->mtx.unlock();
+				
+				glob_mtx.unlock();
 			}
 			else {
 				Output* out = output_serv;
-				glob_mtx.unlock();
 				
 				out->mtx.lock();
 				
@@ -631,6 +584,7 @@ void server_link(int fd) {
 				flush(out);
 				
 				out->mtx.unlock();
+				glob_mtx.unlock();
 			}
 		}
 		else if(car == 'S') {
@@ -638,6 +592,77 @@ void server_link(int fd) {
 			doco(*st);
 		}
 	} while(true);
+}
+
+void worker(int num) {
+	while(true) {
+		if(active_processes.size() > 0) {
+			mtx.lock();
+			if(active_processes.empty()) {
+				mtx.unlock();
+				continue;
+			}
+			
+			State* proc = active_processes.front();
+			active_processes.pop_front();
+			
+			mtx.unlock();
+			
+			if(rand() % 100 == 0) {
+				if(est_serveur) {
+					if(outputs_clients.size() >= 2) {
+						int client = 1 + rand() % (outputs_clients.size() - 1);
+						
+						glob_mtx.lock();
+						outputs_clients[client]->mtx.lock();
+						
+						send_state(outputs_clients[client], proc);
+						
+						outputs_clients[client]->mtx.unlock();
+						glob_mtx.unlock();
+						continue;
+					}
+				}
+				else {
+					glob_mtx.lock();
+					output_serv->mtx.lock();
+					
+					send_state(output_serv, proc);
+					
+					output_serv->mtx.unlock();
+					glob_mtx.unlock();
+					continue;
+				}
+			}
+			
+			for(size_t i = 0;i < 50 && peut_avancer(proc);i++){
+				proc->continuation(proc);
+				if(proc->continuation == nullptr)
+					break;
+			}
+			
+			mtx.lock();
+			if(proc->continuation != nullptr) {
+				active_processes.push_back(proc);
+			}
+			mtx.unlock();
+		}
+		else {
+			this_thread::sleep_for(100ms);
+		}
+	}
+}
+
+void run(size_t nbWorkers = 1) {
+	vector<thread> workers;
+
+	for(size_t iWorker = 0;iWorker < nbWorkers;iWorker++) {
+		workers.push_back(thread(worker, iWorker));
+	}
+
+	for(auto it = workers.begin();it != workers.end();it++) {
+		it->join();
+	}
 }
 
 #endif
