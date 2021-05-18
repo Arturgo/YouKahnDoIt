@@ -299,13 +299,16 @@ void put(T obj, size_t chan) {
 
 template<typename T>
 bool get_ready(size_t chan) {
+	glob_mtx.lock();
 	Channel* channel = channels[chan];
+	glob_mtx.unlock();
 	
 	channel->mtx.lock();
 	bool estOk = channel->buffer.size() >= sizeof(T);
 	if(!estOk)
 		channel->estsature=true;
 	channel->mtx.unlock();
+	
 	return estOk;
 }
 
@@ -435,6 +438,22 @@ void send_state(Output* out, State* st) {
 		put<size_t>(output, out);
 	}
 	
+	put<size_t>(st->inputs.size(), out);
+	
+	for(size_t input : st->inputs) {
+		glob_mtx.lock();
+		delete channels[input];
+		channels.erase(input);
+		glob_mtx.unlock();
+		
+		if(est_serveur) {
+			//TODO : FAIRE QUELQUE CHOSE DE CORRECT
+			owners[input] = 1;
+		}
+		
+		put<size_t>(input, out);
+	}
+	
 	flush(out);
 	
 	out->mtx.unlock();
@@ -459,6 +478,21 @@ State* recv_state(Input* in) {
 		st->outputs.push_back(get<size_t>(in));
 	}
 	
+	size_t nbInputs = get<size_t>(in);
+	
+	for(size_t iInput = 0;iInput < nbInputs;iInput++) {
+		size_t input = get<size_t>(in);
+		st->inputs.push_back(input);
+		
+		if(est_serveur) {
+			owners[input] = 0;
+		}
+		
+		glob_mtx.lock();
+		channels[input] = new Channel();
+		glob_mtx.unlock();
+	}
+	
 	return st;
 }
 
@@ -471,11 +505,13 @@ void Integers(State* state) {
 }
 
 void Out(State* state) {
-	if(get_ready<int>(state->inputs[0]))
+	if(get_ready<int>(state->inputs[0])) {
 		cout << get<int>(state->inputs[0]) << endl;
+	}
 }
 
 void client_link(int fd, int iClient) {
+	cerr << "CONNEXION " << iClient << endl;
 	Output out(fd);
 	Input in(fd);
 	
@@ -487,9 +523,9 @@ void client_link(int fd, int iClient) {
 	put<int>("value", 0, st);
 	
 	State* st2 = new State({q}, {}, Out);
-	doco(*st2);
+	doco(*st);
 	
-	send_state(&out, st);
+	send_state(&out, st2);
 	
 	do {
 		char car = get<char>(&in);
@@ -547,7 +583,47 @@ void server_link(int fd) {
 	doco(*st);
 	
 	do {
-		
+		char car = get<char>(&in);
+		if(car == 'P') {
+			size_t chan = get<size_t>(&in);
+			size_t size = get<size_t>(&in);
+			
+			deque<char> buffer;
+			
+			for(size_t i = 0;i < size;i++) {
+				buffer.push_back(get<char>(&in));
+			}
+			
+			glob_mtx.lock();
+			if(channels.count(chan)) {
+				Channel* channel = channels[chan];
+				glob_mtx.unlock();
+				
+				channel->mtx.lock();
+				
+				channel->estsature = false;
+				for(char car : buffer)
+					channel->buffer.push_front(car);
+				
+				channel->mtx.unlock();
+			}
+			else {
+				Output* out = output_serv;
+				glob_mtx.unlock();
+				
+				out->mtx.lock();
+				
+				put<char>('P', out);
+				put<size_t>(chan, out);
+				put<size_t>(size, out);
+				for(char car : buffer)
+					put<char>(car, out);
+				
+				flush(out);
+				
+				out->mtx.unlock();
+			}
+		}
 	} while(true);
 }
 
