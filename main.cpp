@@ -1,4 +1,3 @@
-#include <iostream>
 #include <string>
 #include "channel.h"
 using namespace std;
@@ -386,13 +385,15 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		primes::primes();
-		
 		threads.push_back(thread(run, 8));
 		
+		outputs_clients.push_back(nullptr);
+		
+		size_t iClient = 0;
 		while(true) {
 			int cfd = accept(fd, (struct sockaddr*)NULL, NULL);
-			threads.push_back(thread(client_link, cfd));
+			threads.push_back(thread(client_link, cfd, iClient));
+			iClient++;
 		}
 	}
 	else {

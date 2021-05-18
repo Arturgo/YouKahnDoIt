@@ -9,6 +9,7 @@
 #include <functional>
 #include <list>
 #include <cassert>
+#include <iostream>
 #include <condition_variable>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -19,6 +20,114 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 using namespace std;
+
+const int BUF_SIZE = 1024;
+
+/* Network Output */
+
+struct Output {
+	int fd;
+	size_t sz;
+	char buffer[BUF_SIZE];
+	mutex mtx;
+	
+	Output(int _fd) {
+		sz = 0;
+		fd = _fd;
+	}
+};
+
+void flush(Output* out) {
+	send(out->fd, out->buffer, out->sz, 0);
+	out->sz = 0;
+}
+
+template<typename T>
+void put(T value, Output* out) {	
+	char* ptr = (char*)&value;
+	
+	for(size_t i = 0;i < sizeof(T);i++) {
+		out->buffer[out->sz++] = ptr[i];
+		if(out->sz == BUF_SIZE) {
+			flush(out);
+		}
+	}
+}
+
+template<>
+void put<string>(string value, Output* out) {
+	put<size_t>(value.size(), out);
+	
+	for(char car : value) {
+		put<char>(car, out);
+	}
+}
+
+template<>
+void put<deque<char>>(deque<char> value, Output* out) {
+	put<size_t>(value.size(), out);
+	
+	for(char car : value) {
+		put<char>(car, out);
+	}
+}
+
+/* Network Input */
+
+struct Input {
+	int fd;
+	size_t sz, pos;
+	char buffer[BUF_SIZE];
+	
+	Input(int _fd) {
+		sz = 0;
+		pos = 0;
+		fd = _fd;
+	}
+};
+
+template<typename T>
+T get(Input* in) {
+	T res;
+	char* ptr = (char*)&res;
+	
+	for(size_t i = 0;i < sizeof(T);i++) {
+		while(in->pos == in->sz) {
+			in->sz = read(in->fd, in->buffer, BUF_SIZE);
+			in->pos = 0;
+		}
+		
+		ptr[i] = in->buffer[in->pos++];
+	}
+	
+	return res;
+}
+
+template<>
+string get<string>(Input* in) {
+	string res;
+	
+	size_t sz = get<size_t>(in);
+	
+	for(size_t i = 0;i < sz;i++) {
+		res.push_back(get<char>(in));
+	}
+	
+	return res;
+}
+
+template<>
+deque<char> get<deque<char>>(Input* in) {
+	deque<char> res;
+	
+	size_t sz = get<size_t>(in);
+	
+	for(size_t i = 0;i < sz;i++) {
+		res.push_back(get<char>(in));
+	}
+	
+	return res;
+}
 
 // PROTOTYPES
 
@@ -35,17 +144,37 @@ struct Channel {
 	bool estsature = false;	
 };
 
-// GLOBAL VARIABLES
+// GLOBAL VARIABLES FOR WORKERS
 
 bool est_serveur;
 size_t nbChannels = 0;
+
+mutex glob_mtx;
 map<size_t, Channel*> channels;
+
+// GLOBAL VARIABLES FOR SERVER
+
+map<size_t, size_t> owners;
+deque<Output*> outputs_clients;
+
+// GLOBAL VARIABLES FOR CHANNEL
+
+Output* output_serv;
 
 // Channel creation
 
 int new_channel() {
-	channels[nbChannels] = new Channel();
-	return nbChannels++;
+	if(est_serveur) {
+		glob_mtx.lock();
+		channels[nbChannels] = new Channel();
+		owners[nbChannels] = 0;
+		size_t res = nbChannels++;
+		glob_mtx.unlock();
+		return res;
+	}
+	else {
+		//TODO
+	}
 }
 
 // STATE DEFINITION : NOT PARALLEL
@@ -128,16 +257,42 @@ T pop(string name, State* state) {
 
 template<typename T>
 void put(T obj, size_t chan) {
-	Channel* channel = channels[chan];
-	
-	channel->mtx.lock();
-	channel->estsature = false;
-	char* ptr = (char*)&obj;
-	for(size_t oct = 0;oct < sizeof(T);oct++) {
-		channel->buffer.push_front(ptr[oct]);
+	glob_mtx.lock();
+	if(channels.count(chan)) {
+		Channel* channel = channels[chan];
+		glob_mtx.unlock();
+		
+		channel->mtx.lock();
+		
+		channel->estsature = false;
+		char* ptr = (char*)&obj;
+		for(size_t oct = 0;oct < sizeof(T);oct++) {
+			channel->buffer.push_front(ptr[oct]);
+		}
+		
+		channel->mtx.unlock();
+	}
+	else {
+		Output* out;
+		
+		if(est_serveur)
+			out = outputs_clients[owners[chan]];
+		else
+			out = output_serv;
+		
+		glob_mtx.unlock();
+		
+		out->mtx.lock();
+		
+		put<char>('P', out);
+		put<size_t>(chan, out);
+		put<size_t>(sizeof(T), out);
+		put<T>(obj, out);
+		flush(out);
+		
+		out->mtx.unlock();
 	}
 	
-	channel->mtx.unlock();
 }
 
 // GET ANY OBJECT FROM CHANNEL
@@ -260,116 +415,11 @@ void run(size_t nbWorkers = 1) {
 	}
 }
 
-const int BUF_SIZE = 1024;
-
-/* Network Output */
-
-struct Output {
-	int fd;
-	size_t sz;
-	char buffer[BUF_SIZE];
-	
-	Output(int _fd) {
-		sz = 0;
-		fd = _fd;
-	}
-};
-
-void flush(Output* out) {
-	send(out->fd, out->buffer, out->sz, 0);
-	out->sz = 0;
-}
-
-template<typename T>
-void put(T value, Output* out) {
-	char* ptr = (char*)&value;
-	
-	for(size_t i = 0;i < sizeof(T);i++) {
-		out->buffer[out->sz++] = ptr[i];
-		if(out->sz == BUF_SIZE) {
-			flush(out);
-		}
-	}
-}
-
-template<>
-void put<string>(string value, Output* out) {
-	put<size_t>(value.size(), out);
-	
-	for(char car : value) {
-		put<char>(car, out);
-	}
-}
-
-template<>
-void put<deque<char>>(deque<char> value, Output* out) {
-	put<size_t>(value.size(), out);
-	
-	for(char car : value) {
-		put<char>(car, out);
-	}
-}
-
-/* Network Input */
-
-struct Input {
-	int fd;
-	size_t sz, pos;
-	char buffer[BUF_SIZE];
-	
-	Input(int _fd) {
-		sz = 0;
-		pos = 0;
-		fd = _fd;
-	}
-};
-
-template<typename T>
-T get(Input* in) {
-	T res;
-	char* ptr = (char*)&res;
-	
-	for(size_t i = 0;i < sizeof(T);i++) {
-		while(in->pos == in->sz) {
-			in->sz = read(in->fd, in->buffer, BUF_SIZE);
-			in->pos = 0;
-		}
-		
-		ptr[i] = in->buffer[in->pos++];
-	}
-	
-	return res;
-}
-
-template<>
-string get<string>(Input* in) {
-	string res;
-	
-	size_t sz = get<size_t>(in);
-	
-	for(size_t i = 0;i < sz;i++) {
-		res.push_back(get<char>(in));
-	}
-	
-	return res;
-}
-
-template<>
-deque<char> get<deque<char>>(Input* in) {
-	deque<char> res;
-	
-	size_t sz = get<size_t>(in);
-	
-	for(size_t i = 0;i < sz;i++) {
-		res.push_back(get<char>(in));
-	}
-	
-	return res;
-}
-
 /* Send states through network */
 
 void send_state(Output* out, State* st) {
+	out->mtx.lock();
+	
 	put<size_t>((size_t)st->continuation - (size_t)FPtrRef, out);
 	
 	put<size_t>(st->memory.size(), out);
@@ -379,7 +429,15 @@ void send_state(Output* out, State* st) {
 		put<deque<char>>(var.second, out);
 	}
 	
+	put<size_t>(st->outputs.size(), out);
+
+	for(size_t output : st->outputs) {
+		put<size_t>(output, out);
+	}
+	
 	flush(out);
+	
+	out->mtx.unlock();
 }
 
 State* recv_state(Input* in) {
@@ -395,38 +453,101 @@ State* recv_state(Input* in) {
 		st->memory[name] = content;
 	}
 	
+	size_t nbOutputs = get<size_t>(in);
+	
+	for(size_t iOutput = 0;iOutput < nbOutputs;iOutput++) {
+		st->outputs.push_back(get<size_t>(in));
+	}
+	
 	return st;
 }
 
 /* New link */
 
-void client_link(int fd) {
-	cerr << "CONNEXION" << endl;
-	
+void Integers(State* state) {
+	int value = get<int>("value", state);
+	put<int>(value, state->outputs[0]);
+	put<int>("value", value + 1, state);
+}
+
+void Out(State* state) {
+	if(get_ready<int>(state->inputs[0]))
+		cout << get<int>(state->inputs[0]) << endl;
+}
+
+void client_link(int fd, int iClient) {
 	Output out(fd);
 	Input in(fd);
 	
+	outputs_clients.push_back(&out);
+	
+	size_t q = new_channel();
+	
+	State* st = new State({}, {q}, Integers);
+	put<int>("value", 0, st);
+	
+	State* st2 = new State({q}, {}, Out);
+	doco(*st2);
+	
+	send_state(&out, st);
+	
 	do {
-		put<string>("ping", &out);
-		flush(&out);
-		
-		string answer = get<string>(&in);
-		cerr << answer << endl;
+		char car = get<char>(&in);
+		if(car == 'P') {
+			size_t chan = get<size_t>(&in);
+			size_t size = get<size_t>(&in);
+			
+			deque<char> buffer;
+			
+			for(size_t i = 0;i < size;i++) {
+				buffer.push_back(get<char>(&in));
+			}
+			
+			glob_mtx.lock();
+			if(channels.count(chan)) {
+				Channel* channel = channels[chan];
+				glob_mtx.unlock();
+				
+				channel->mtx.lock();
+				
+				channel->estsature = false;
+				for(char car : buffer)
+					channel->buffer.push_front(car);
+				
+				channel->mtx.unlock();
+			}
+			else {
+				Output* out = outputs_clients[owners[chan]];
+				glob_mtx.unlock();
+				
+				out->mtx.lock();
+				
+				put<char>('P', out);
+				put<size_t>(chan, out);
+				put<size_t>(size, out);
+				for(char car : buffer)
+					put<char>(car, out);
+				
+				flush(out);
+				
+				out->mtx.unlock();
+			}
+		}
 	} while(true);
-
-	close(fd);
 }
 
 void server_link(int fd) {
 	Input in(fd);
 	Output out(fd);
 	
+	output_serv = &out;
+	
+	State* st = recv_state(&in);
+	
+	doco(*st);
+	
 	do {
-		string question = get<string>(&in);
-		cerr << question << endl;
 		
-		put<string>("pong", &out);
-		flush(&out);
 	} while(true);
 }
 
