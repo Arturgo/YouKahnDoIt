@@ -182,7 +182,7 @@ namespace matrices {
 					size_t idA = 4 * iL + 2 * iI;
 					size_t idB = 4 * iI + 2 * iC + 1;
 
-					Channel *in = new Channel(), *out = new Channel();
+					size_t in = new_channel(), out = new_channel();
 					st->inputs.push_back(out);
 					st->outputs.push_back(in);
 					
@@ -263,7 +263,7 @@ namespace matrices {
 		st->continuation = nullptr;
 	}
 
-	State st_multiply(Channel* in, Channel* out) {
+	State st_multiply(size_t in, size_t out) {
 		State* st = new State({in}, {out}, Load);
 		push<void (*)(State*)>("f_ptr", Load, st);
 		push<void (*)(State*)>("f_ptr", FastMultiply, st);
@@ -283,12 +283,12 @@ namespace matrices {
 	}
 
 	void multiply() {
-		Channel in, out;
+		size_t in = new_channel(), out = new_channel();
 		
-		State st = st_multiply(&in, &out);
+		State st = st_multiply(in, out);
 		
 		doco(
-			State({}, {&in}, Input),
+			State({}, {in}, Input),
 			st
 		);
 	}
@@ -331,7 +331,7 @@ namespace primes {
 			int prime = get<int>(state->inputs[0]);
 			put<int>(prime, state->outputs[0]);
 			
-			Channel* q = new Channel();
+			size_t q = new_channel();
 			
 			State filter({state->inputs[0]}, {q}, Filter);
 			put<int>("prime", prime, &filter);
@@ -346,7 +346,7 @@ namespace primes {
 	}
 
 	void primes() {
-		Channel *q1 = new Channel(), *q2 = new Channel();
+		size_t q1 = new_channel(), q2 = new_channel();
 		
 		State integers({}, {q1}, Integers);
 		put<int>("value", 2, &integers);
@@ -373,6 +373,8 @@ int main(int argc, char* argv[]) {
 	
 	if(argc == 2) {
 		// Server side
+		est_serveur = true;
+		
 		serv_addr.sin_family = AF_INET;    
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY); 
 		serv_addr.sin_port = htons(port);  
@@ -395,6 +397,8 @@ int main(int argc, char* argv[]) {
 	}
 	else {
 		// Client side
+		est_serveur = false;
+		
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_port = htons(port);
 		serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");

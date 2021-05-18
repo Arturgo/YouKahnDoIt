@@ -22,7 +22,6 @@ using namespace std;
 
 // PROTOTYPES
 
-struct Channel;
 struct State;
 
 void FPtrRef(State* st) {};
@@ -32,8 +31,22 @@ void FPtrRef(State* st) {};
 struct Channel {
 	mutex mtx;
 	deque<char> buffer;
-	bool estsature=false;	
+	
+	bool estsature = false;	
 };
+
+// GLOBAL VARIABLES
+
+bool est_serveur;
+size_t nbChannels = 0;
+map<size_t, Channel*> channels;
+
+// Channel creation
+
+int new_channel() {
+	channels[nbChannels] = new Channel();
+	return nbChannels++;
+}
 
 // STATE DEFINITION : NOT PARALLEL
 
@@ -43,9 +56,9 @@ struct State {
 	// DUE TO VIRTUAL MEMORY, EVERY COMPUTER MUST RUN THE SAME BINARY !
 	void (*continuation)(State*);
 	
-	vector<Channel*> inputs, outputs;
+	vector<size_t> inputs, outputs;
 	
-	State(vector<Channel*> _inputs, vector<Channel*> _outputs, void (*_continuation)(State*) ) {
+	State(vector<size_t> _inputs, vector<size_t> _outputs, void (*_continuation)(State*) ) {
 		inputs = _inputs;
 		outputs = _outputs;
 		continuation = _continuation;
@@ -114,9 +127,11 @@ T pop(string name, State* state) {
 // PUT ANY OBJECT TO CHANNEL
 
 template<typename T>
-void put(T obj, Channel* channel) {
+void put(T obj, size_t chan) {
+	Channel* channel = channels[chan];
+	
 	channel->mtx.lock();
-	channel->estsature=false;
+	channel->estsature = false;
 	char* ptr = (char*)&obj;
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
 		channel->buffer.push_front(ptr[oct]);
@@ -128,7 +143,9 @@ void put(T obj, Channel* channel) {
 // GET ANY OBJECT FROM CHANNEL
 
 template<typename T>
-bool get_ready(Channel* channel) {
+bool get_ready(size_t chan) {
+	Channel* channel = channels[chan];
+	
 	channel->mtx.lock();
 	bool estOk = channel->buffer.size() >= sizeof(T);
 	if(!estOk)
@@ -138,9 +155,10 @@ bool get_ready(Channel* channel) {
 }
 
 template<typename T>
-T get(Channel* channel) {
-	T obj;
+T get(size_t chan) {
+	Channel* channel = channels[chan];
 	
+	T obj;
 	channel->mtx.lock();
 	
 	char* ptr = (char*)&obj;
@@ -156,10 +174,11 @@ T get(Channel* channel) {
 
 //VERIFIE QU'ON PEUT CONTINUER A EXECUTER
 bool peut_avancer(State *state){
-	for(auto el : state->inputs)if(el->estsature)return false;
+	for(size_t chan : state->inputs)
+		if(channels[chan]->estsature)
+			return false;
 	return true;
 }
-
 
 // KAHN NETWORK IMPLEMENTATION FOR PARALLELISM
 
