@@ -21,12 +21,14 @@
 #include <netinet/in.h>
 using namespace std;
 
+const int NB_ORDIS = 256;
 const int BUF_SIZE = 1024;
 
 /* Network Output */
 
 struct Output {
 	int fd;
+	size_t owner;
 	size_t sz;
 	char buffer[BUF_SIZE];
 	mutex mtx;
@@ -151,13 +153,15 @@ size_t nbChannels = 0;
 
 mutex glob_mtx;
 map<size_t, Channel*> channels;
+size_t instance_id = 0;
+size_t nbCreated = 0;
 
 // GLOBAL VARIABLES FOR SERVER
 
 map<size_t, size_t> owners;
 deque<Output*> outputs_clients;
 
-// GLOBAL VARIABLES FOR CHANNEL
+// GLOBAL VARIABLES FOR CLIENTS
 
 Output* output_serv;
 
@@ -166,11 +170,12 @@ Output* output_serv;
 int new_channel() {
 	if(est_serveur) {
 		glob_mtx.lock();
-		channels[nbChannels] = new Channel();
-		owners[nbChannels] = 0;
-		size_t res = nbChannels++;
+		size_t chan = instance_id + nbCreated * NB_ORDIS;
+		channels[chan] = new Channel();
+		owners[chan] = 0;
+		nbCreated++;
 		glob_mtx.unlock();
-		return res;
+		return chan;
 	}
 	else {
 		//TODO
@@ -375,7 +380,7 @@ void worker(int num) {
 			active_processes.pop_front();
 			mtx.unlock();
 			
-			while(peut_avancer(proc)){
+			for(size_t i = 0;i < 50 && peut_avancer(proc);i++){
 				proc->continuation(proc);
 				if(proc->continuation == nullptr)break;
 				//printf("%d\n", proc->continuation);
@@ -447,8 +452,7 @@ void send_state(Output* out, State* st) {
 		glob_mtx.unlock();
 		
 		if(est_serveur) {
-			//TODO : FAIRE QUELQUE CHOSE DE CORRECT
-			owners[input] = 1;
+			owners[input] = out->owner;
 		}
 		
 		put<size_t>(input, out);
@@ -512,10 +516,14 @@ void Out(State* state) {
 
 void client_link(int fd, int iClient) {
 	cerr << "CONNEXION " << iClient << endl;
+	
 	Output out(fd);
+	out.owner = iClient;
 	Input in(fd);
 	
 	outputs_clients.push_back(&out);
+	
+	put<size_t>(iClient, &out);
 	
 	size_t q = new_channel();
 	
@@ -577,6 +585,10 @@ void server_link(int fd) {
 	Output out(fd);
 	
 	output_serv = &out;
+	
+	instance_id = get<size_t>(&in);
+	
+	cerr << "CLIENT " << instance_id << endl;
 	
 	State* st = recv_state(&in);
 	

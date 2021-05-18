@@ -376,7 +376,7 @@ int main(int argc, char* argv[]) {
 		
 		serv_addr.sin_family = AF_INET;    
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY); 
-		serv_addr.sin_port = htons(port);  
+		serv_addr.sin_port = htons(port);
 		
 		bind(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 		
@@ -389,7 +389,7 @@ int main(int argc, char* argv[]) {
 		
 		outputs_clients.push_back(nullptr);
 		
-		size_t iClient = 0;
+		size_t iClient = 1;
 		while(true) {
 			int cfd = accept(fd, (struct sockaddr*)NULL, NULL);
 			threads.push_back(thread(client_link, cfd, iClient));
