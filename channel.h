@@ -29,9 +29,8 @@ struct State;
 
 struct Channel {
 	mutex mtx;
-	State *entree, *sortie;
 	deque<char> buffer;
-	bool estsature=false;
+	bool estsature=false;	
 };
 
 // STATE DEFINITION : NOT PARALLEL
