@@ -10,6 +10,14 @@
 #include <list>
 #include <cassert>
 #include <condition_variable>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 using namespace std;
 
 // PROTOTYPES
@@ -230,6 +238,18 @@ void run(size_t nbWorkers = 1) {
 	for(auto it = workers.begin();it != workers.end();it++) {
 		it->join();
 	}
+}
+
+void send_state(int fd, State* st) {
+	ostringstream buffer;
+	
+	buffer << memory->size() << " ";
+	
+	send(fd, buffer.str().c_str(), buffer.str().size() + 1, 0);
+}
+
+void recv_state(int fd, State* st) {
+	
 }
 
 #endif
