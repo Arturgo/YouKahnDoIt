@@ -54,7 +54,7 @@ namespace matrices {
 			if(lig == size) {
 				pop<size_t>("mat_id", st);
 				pop<size_t>("chan", st);
-				st->continuation = pop<function<void(State*)>>("f_ptr", st);
+				st->continuation = pop<void (*)(State*)>("f_ptr", st);
 			}
 			
 			put<size_t>("col", col, st);
@@ -104,7 +104,7 @@ namespace matrices {
 			cout << endl;
 		}
 		
-		st->continuation = pop<function<void(State*)>>("f_ptr", st);
+		st->continuation = pop<void (*)(State*)>("f_ptr", st);
 	}
 
 	// Slow multiplication of two matrixes
@@ -136,7 +136,7 @@ namespace matrices {
 			}
 		}
 		
-		st->continuation = pop<function<void(State*)>>("f_ptr", st);
+		st->continuation = pop<void (*)(State*)>("f_ptr", st);
 	}
 
 	void FastMultiply_merge(State* st);
@@ -174,7 +174,7 @@ namespace matrices {
 			}
 		}
 		
-		push_front<function<void(State*)>>("f_ptr", FastMultiply_merge, st);
+		push_front<void (*)(State*)>("f_ptr", FastMultiply_merge, st);
 		
 		for(size_t iL = 0;iL < 2;iL++) {
 			for(size_t iC = 0;iC < 2;iC++) {
@@ -196,18 +196,18 @@ namespace matrices {
 						put<int>(val, in);
 					}
 					
-					push_front<function<void(State*)>>("f_ptr", Load, st);
+					push_front<void (*)(State*)>("f_ptr", Load, st);
 					push_front<size_t>("mat_id", 16 + 4 * iL + 2 * iC + iI, st);
 					push_front<size_t>("chan", st->inputs.size() - 1, st);
 					
 					State* nst = new State({in}, {out}, Load);
-					push<function<void(State*)>>("f_ptr", Load, nst);
+					push<void (*)(State*)>("f_ptr", Load, nst);
 					if(sz <= 64)
-						push<function<void(State*)>>("f_ptr", SlowMultiply, nst);
+						push<void (*)(State*)>("f_ptr", SlowMultiply, nst);
 					else
-						push<function<void(State*)>>("f_ptr", FastMultiply, nst);
+						push<void (*)(State*)>("f_ptr", FastMultiply, nst);
 					
-					push<function<void(State*)>>("f_ptr", Store, nst);
+					push<void (*)(State*)>("f_ptr", Store, nst);
 					
 					push<size_t>("chan", 0, nst);
 					push<size_t>("chan", 0, nst);
@@ -223,7 +223,7 @@ namespace matrices {
 			}
 		}
 		
-		st->continuation = pop<function<void(State*)>>("f_ptr", st);
+		st->continuation = pop<void (*)(State*)>("f_ptr", st);
 	}
 
 	void FastMultiply_merge(State* st) {	
@@ -256,7 +256,7 @@ namespace matrices {
 			}
 		}
 		
-		st->continuation = pop<function<void(State*)>>("f_ptr", st);
+		st->continuation = pop<void (*)(State*)>("f_ptr", st);
 	}
 
 	void End(State* st) {
@@ -265,10 +265,10 @@ namespace matrices {
 
 	State st_multiply(Channel* in, Channel* out) {
 		State* st = new State({in}, {out}, Load);
-		push<function<void(State*)>>("f_ptr", Load, st);
-		push<function<void(State*)>>("f_ptr", FastMultiply, st);
-		push<function<void(State*)>>("f_ptr", Output, st);
-		push<function<void(State*)>>("f_ptr", End, st);
+		push<void (*)(State*)>("f_ptr", Load, st);
+		push<void (*)(State*)>("f_ptr", FastMultiply, st);
+		push<void (*)(State*)>("f_ptr", Output, st);
+		push<void (*)(State*)>("f_ptr", End, st);
 		
 		push<size_t>("chan", 0, st);
 		push<size_t>("chan", 0, st);
@@ -291,8 +291,6 @@ namespace matrices {
 			State({}, {&in}, Input),
 			st
 		);
-		
-		run(8);
 	}
 };
 
@@ -348,37 +346,36 @@ namespace primes {
 	}
 
 	void primes() {
-		Channel q1, q2;
+		Channel *q1 = new Channel(), *q2 = new Channel();
 		
-		State integers({}, {&q1}, Integers);
+		State integers({}, {q1}, Integers);
 		put<int>("value", 2, &integers);
 		
 		doco(
 			integers, 
-			State({&q1}, {&q2}, Sift),
-			State({&q2}, {}, Output)
+			State({q1}, {q2}, Sift),
+			State({q2}, {}, Output)
 		);
-		
-		run(8);
 	}
 };
+
+vector<thread> threads;
 
 int main(int argc, char* argv[]) {
 	ios_base::sync_with_stdio(false);
 	cin.tie(nullptr);
 	cout.tie(nullptr);
 	
-	State integers({}, {&q1}, Integers);
-	put<int>("value", 2, &integers);
-	
 	struct sockaddr_in serv_addr;
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	
+	const int port = stoi(getenv("PORT"));
 	
 	if(argc == 2) {
 		// Server side
 		serv_addr.sin_family = AF_INET;    
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY); 
-		serv_addr.sin_port = htons(8000);  
+		serv_addr.sin_port = htons(port);  
 		
 		bind(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 		
@@ -387,19 +384,19 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
+		primes::primes();
+		
+		threads.push_back(thread(run, 8));
+		
 		while(true) {
 			int cfd = accept(fd, (struct sockaddr*)NULL, NULL);
-			cerr << "CONNEXION" << endl;
-			
-			send_state(cfd, &integers);
-	 
-			close(cfd);
+			threads.push_back(thread(client_link, cfd));
 		}
 	}
 	else {
 		// Client side
 		serv_addr.sin_family = AF_INET;
-		serv_addr.sin_port = htons(8000);
+		serv_addr.sin_port = htons(port);
 		serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 		
 		if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
@@ -407,15 +404,8 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		int sz = 0;
-		char buffer[1024];
-		
-		while((sz = read(fd, buffer, 1023)) > 0) {
-		   buffer[sz] = 0;
-		  	fputs(buffer, stdout);
-		}
+		threads.push_back(thread(server_link, fd));
+		run(8);
 	}
-	
-	//primes::primes();
 	return 0;
 }

@@ -25,6 +25,8 @@ using namespace std;
 struct Channel;
 struct State;
 
+void FPtrRef(State* st) {};
+
 // CHANNEL DEFINITION : PARALLEL
 
 struct Channel {
@@ -39,11 +41,11 @@ struct State {
 	map<string, deque<char>> memory;
 	
 	// DUE TO VIRTUAL MEMORY, EVERY COMPUTER MUST RUN THE SAME BINARY !
-	function<void(State*)> continuation;
+	void (*continuation)(State*);
 	
 	vector<Channel*> inputs, outputs;
 	
-	State(vector<Channel*> _inputs, vector<Channel*> _outputs, function<void(State*)> _continuation) {
+	State(vector<Channel*> _inputs, vector<Channel*> _outputs, void (*_continuation)(State*) ) {
 		inputs = _inputs;
 		outputs = _outputs;
 		continuation = _continuation;
@@ -220,7 +222,7 @@ void worker(int num) {
 			}
 			mtx.unlock();
 			
-			break;
+			sleep(1);
 		}
 	}
 }
@@ -239,16 +241,174 @@ void run(size_t nbWorkers = 1) {
 	}
 }
 
-void send_state(int fd, State* st) {
-	ostringstream buffer;
+const int BUF_SIZE = 1024;
+
+/* Network Output */
+
+struct Output {
+	int fd;
+	size_t sz;
+	char buffer[BUF_SIZE];
 	
-	buffer << memory->size() << " ";
-	
-	send(fd, buffer.str().c_str(), buffer.str().size() + 1, 0);
+	Output(int _fd) {
+		sz = 0;
+		fd = _fd;
+	}
+};
+
+void flush(Output* out) {
+	send(out->fd, out->buffer, out->sz, 0);
+	out->sz = 0;
 }
 
-void recv_state(int fd, State* st) {
+template<typename T>
+void put(T value, Output* out) {
+	char* ptr = (char*)&value;
 	
+	for(size_t i = 0;i < sizeof(T);i++) {
+		out->buffer[out->sz++] = ptr[i];
+		if(out->sz == BUF_SIZE) {
+			flush(out);
+		}
+	}
+}
+
+template<>
+void put<string>(string value, Output* out) {
+	put<size_t>(value.size(), out);
+	
+	for(char car : value) {
+		put<char>(car, out);
+	}
+}
+
+template<>
+void put<deque<char>>(deque<char> value, Output* out) {
+	put<size_t>(value.size(), out);
+	
+	for(char car : value) {
+		put<char>(car, out);
+	}
+}
+
+/* Network Input */
+
+struct Input {
+	int fd;
+	size_t sz, pos;
+	char buffer[BUF_SIZE];
+	
+	Input(int _fd) {
+		sz = 0;
+		pos = 0;
+		fd = _fd;
+	}
+};
+
+template<typename T>
+T get(Input* in) {
+	T res;
+	char* ptr = (char*)&res;
+	
+	for(size_t i = 0;i < sizeof(T);i++) {
+		while(in->pos == in->sz) {
+			in->sz = read(in->fd, in->buffer, BUF_SIZE);
+			in->pos = 0;
+		}
+		
+		ptr[i] = in->buffer[in->pos++];
+	}
+	
+	return res;
+}
+
+template<>
+string get<string>(Input* in) {
+	string res;
+	
+	size_t sz = get<size_t>(in);
+	
+	for(size_t i = 0;i < sz;i++) {
+		res.push_back(get<char>(in));
+	}
+	
+	return res;
+}
+
+template<>
+deque<char> get<deque<char>>(Input* in) {
+	deque<char> res;
+	
+	size_t sz = get<size_t>(in);
+	
+	for(size_t i = 0;i < sz;i++) {
+		res.push_back(get<char>(in));
+	}
+	
+	return res;
+}
+
+/* Send states through network */
+
+void send_state(Output* out, State* st) {
+	put<size_t>((size_t)st->continuation - (size_t)FPtrRef, out);
+	
+	put<size_t>(st->memory.size(), out);
+	
+	for(pair<string, deque<char>> var : st->memory) {
+		put<string>(var.first, out);
+		put<deque<char>>(var.second, out);
+	}
+	
+	flush(out);
+}
+
+State* recv_state(Input* in) {
+	State* st = new State();
+	
+	st->continuation = (void (*)(State*))(get<size_t>(in) + (size_t)FPtrRef);
+	
+	size_t memorySz = get<size_t>(in);
+	
+	for(size_t iVar = 0;iVar < memorySz;iVar++) {
+		string name = get<string>(in);
+		deque<char> content = get<deque<char>>(in);
+		st->memory[name] = content;
+	}
+	
+	return st;
+}
+
+/* New link */
+
+void client_link(int fd) {
+	cerr << "CONNEXION" << endl;
+	
+	Output out(fd);
+	Input in(fd);
+	
+	do {
+		put<string>("ping", &out);
+		flush(&out);
+		
+		string answer = get<string>(&in);
+		cerr << answer << endl;
+	} while(true);
+
+	close(fd);
+}
+
+void server_link(int fd) {
+	Input in(fd);
+	Output out(fd);
+	
+	do {
+		string question = get<string>(&in);
+		cerr << question << endl;
+		
+		put<string>("pong", &out);
+		flush(&out);
+	} while(true);
 }
 
 #endif
