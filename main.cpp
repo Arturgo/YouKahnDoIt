@@ -301,6 +301,8 @@ namespace matrices {
 /***************************************/
 
 namespace primes {
+	const int MAX_VALUE = 100000;
+	
 	void Output(State* state) {
 		if(get_ready<int>(state->inputs[0]))
 			cout << get<int>(state->inputs[0]) << endl;
@@ -309,8 +311,10 @@ namespace primes {
 	void Integers(State* state) {
 		int value = get<int>("value", state);
 		
-		put<int>(value, state->outputs[0]);
-		put<int>("value", value + 1, state);
+		if(value <= MAX_VALUE) {
+			put<int>(value, state->outputs[0]);
+			put<int>("value", value + 1, state);
+		}
 	}
 
 	void Filter(State* state) {
@@ -359,11 +363,59 @@ namespace primes {
 	}
 };
 
-int main() {
+int main(int argc, char* argv[]) {
 	ios_base::sync_with_stdio(false);
 	cin.tie(nullptr);
 	cout.tie(nullptr);
 	
-	primes::primes();
+	State integers({}, {&q1}, Integers);
+	put<int>("value", 2, &integers);
+	
+	struct sockaddr_in serv_addr;
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	
+	if(argc == 2) {
+		// Server side
+		serv_addr.sin_family = AF_INET;    
+		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY); 
+		serv_addr.sin_port = htons(8000);  
+		
+		bind(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+		
+		if(listen(fd, 10) == -1){
+			cerr << "SOCKET ERROR" << endl;
+			return -1;
+		}
+		
+		while(true) {
+			int cfd = accept(fd, (struct sockaddr*)NULL, NULL);
+			cerr << "CONNEXION" << endl;
+			
+			send_state(cfd, &integers);
+	 
+			close(cfd);
+		}
+	}
+	else {
+		// Client side
+		serv_addr.sin_family = AF_INET;
+		serv_addr.sin_port = htons(8000);
+		serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+		
+		if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+			cerr << "SOCKET ERROR" << endl;
+			return -1;
+		}
+		
+		int sz = 0;
+		char buffer[1024];
+		
+		while((sz = read(fd, buffer, 1023)) > 0) {
+		   buffer[sz] = 0;
+		  	fputs(buffer, stdout);
+		}
+	}
+	
+	//primes::primes();
 	return 0;
 }
