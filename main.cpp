@@ -9,7 +9,7 @@ mutex m;
 /***************************************/
 
 namespace matrices {
-	const int P2 = 8;
+	const int P2 = 7;
 	const int SIZE = (1 << P2);
 
 	// randomly generate two matrixes of size SIZE
@@ -108,7 +108,6 @@ namespace matrices {
 
 	// Slow multiplication of two matrixes
 	void SlowMultiply(State* st) {
-		cerr << "SLOW" << endl;
 		size_t sz = get<size_t>("size", st);
 		size_t idA = pop<size_t>("mat_id", st);
 		size_t idB = pop<size_t>("mat_id", st);
@@ -142,7 +141,6 @@ namespace matrices {
 
 	// Multiplication of two matrices using a divide and conquer approach
 	void FastMultiply(State* st) {
-		cerr << "SPLIT" << endl;
 		size_t sz = get<size_t>("size", st);
 		size_t idA = pop<size_t>("mat_id", st);
 		size_t idB = pop<size_t>("mat_id", st);
@@ -226,8 +224,7 @@ namespace matrices {
 		st->continuation = pop<void (*)(State*)>("f_ptr", st);
 	}
 
-	void FastMultiply_merge(State* st) {	
-		cerr << "MERGE" << endl;
+	void FastMultiply_merge(State* st) {
 		size_t sz = get<size_t>("tsize", st);
 		size_t idC = pop<size_t>("mat_id", st);
 		
