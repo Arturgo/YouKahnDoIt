@@ -461,8 +461,7 @@ State* recv_state(Input* in) {
 		
 		glob_mtx.unlock();
 	}
-	
-	cerr << "RECEIVED" << endl;
+
 	return st;
 }
 
