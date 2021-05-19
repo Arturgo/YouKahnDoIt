@@ -144,6 +144,8 @@ struct Channel {
 	deque<char> buffer;
 	
 	bool estsature = false;	
+	
+	size_t pos = 0;
 };
 
 // GLOBAL VARIABLES FOR WORKERS
@@ -153,6 +155,7 @@ size_t nbChannels = 0;
 
 mutex glob_mtx;
 map<size_t, Channel*> channels;
+map<size_t, size_t> positions;
 size_t instance_id = 0;
 size_t nbCreated = 0;
 
@@ -170,7 +173,9 @@ Output* output_serv;
 int new_channel() {
 	glob_mtx.lock();
 	size_t chan = instance_id + nbCreated * NB_ORDIS;
+	
 	channels[chan] = new Channel();
+	positions[chan] = 0;
 	
 	if(est_serveur)
 		owners[chan] = 0;
@@ -209,7 +214,7 @@ T get(string name, State* state) {
 	char* ptr = (char*)&obj;
 	for(size_t oct = 0;oct < sizeof(T);oct++) {
 		ptr[oct] = state->memory[name][oct];
-	} 
+	}
 	
 	return obj;
 }
@@ -278,7 +283,8 @@ void (*pop<void (*)(State*)>(string name, State* state)) (State*) {
 template<typename T>
 void put(T obj, size_t chan) {
 	glob_mtx.lock();
-	if(channels.count(chan)) {
+	
+	if(channels.count(chan) && positions[chan] == channels[chan]->pos) {
 		Channel* channel = channels[chan];
 		
 		channel->estsature = false;
@@ -292,7 +298,7 @@ void put(T obj, size_t chan) {
 	else {
 		Output* out;
 		
-		if(est_serveur && owners.count(chan) != 0)
+		if(est_serveur && owners.count(chan) != 0 && owners[chan] != 0)
 			out = outputs_clients[owners[chan]];
 		else if (!est_serveur)
 			out = output_serv;
@@ -302,6 +308,10 @@ void put(T obj, size_t chan) {
 		put<char>('P', out);
 		put<size_t>(chan, out);
 		put<size_t>(sizeof(T), out);
+		
+		put<size_t>(positions[chan], out);
+		positions[chan] += sizeof(T);
+		
 		put<T>(obj, out);
 		flush(out);
 		
@@ -395,12 +405,14 @@ void send_state(Output* out, State* st) {
 
 	for(size_t output : st->outputs) {
 		put<size_t>(output, out);
+		put<size_t>(positions[output], out);
 	}
 	
 	put<size_t>(st->inputs.size(), out);
 	
 	for(size_t input : st->inputs) {		
 		deque<char> buffer = channels[input]->buffer;
+		size_t pos = channels[input]->pos;
 		delete channels[input];
 		channels.erase(input);
 		
@@ -410,6 +422,7 @@ void send_state(Output* out, State* st) {
 		
 		put<size_t>(input, out);
 		put<size_t>(buffer.size(), out);
+		put<size_t>(pos, out);
 		
 		for(char car : buffer) {
 			put<char>(car, out);
@@ -433,10 +446,14 @@ State* recv_state(Input* in) {
 		st->memory[name] = content;
 	}
 	
+	glob_mtx.lock();
+	
 	size_t nbOutputs = get<size_t>(in);
 	
 	for(size_t iOutput = 0;iOutput < nbOutputs;iOutput++) {
-		st->outputs.push_back(get<size_t>(in));
+		int output = get<size_t>(in);
+		st->outputs.push_back(output);
+		positions[output] = get<size_t>(in);
 	}
 	
 	size_t nbInputs = get<size_t>(in);
@@ -447,20 +464,21 @@ State* recv_state(Input* in) {
 		
 		size_t inputSz = get<size_t>(in);
 		
-		glob_mtx.lock();
+		size_t pos = get<size_t>(in);
 		
 		if(est_serveur) {
 			owners[input] = 0;
 		}
 		
 		channels[input] = new Channel();
+		channels[input]->pos = pos;
 		
 		for(size_t i = 0;i < inputSz;i++) {
 			channels[input]->buffer.push_back(get<char>(in));
 		}
-		
-		glob_mtx.unlock();
 	}
+	
+	glob_mtx.unlock();
 
 	return st;
 }
@@ -488,6 +506,7 @@ void client_link(int fd, int iClient) {
 		if(car == 'P') {
 			size_t chan = get<size_t>(&in);
 			size_t size = get<size_t>(&in);
+			size_t pos = get<size_t>(&in);
 			
 			deque<char> buffer;
 			
@@ -496,24 +515,29 @@ void client_link(int fd, int iClient) {
 			}
 			
 			glob_mtx.lock();
-			if(channels.count(chan)) {
+			if(channels.count(chan) && pos == channels[chan]->pos) {
 				Channel* channel = channels[chan];
 				
 				channel->estsature = false;
-				for(char car : buffer)
+				for(char car : buffer) {
 					channel->buffer.push_front(car);
+					channels[chan]->pos++;
+				}
 				
 				glob_mtx.unlock();
 			}
 			else {
 				Output* out = outputs_clients[1];
 				
-				if(owners.count(chan) && owners[chan] != 0)
+				if(owners.count(chan) && owners[chan] != 0) {
 					out = outputs_clients[owners[chan]];
+				}
 				
 				put<char>('P', out);
 				put<size_t>(chan, out);
 				put<size_t>(size, out);
+				put<size_t>(pos, out);
+				
 				for(char car : buffer)
 					put<char>(car, out);
 				
@@ -544,6 +568,7 @@ void server_link(int fd) {
 		if(car == 'P') {
 			size_t chan = get<size_t>(&in);
 			size_t size = get<size_t>(&in);
+			size_t pos = get<size_t>(&in);
 			
 			deque<char> buffer;
 			
@@ -552,12 +577,14 @@ void server_link(int fd) {
 			}
 			
 			glob_mtx.lock();
-			if(channels.count(chan)) {
+			if(channels.count(chan) && pos == channels[chan]->pos) {
 				Channel* channel = channels[chan];
 				
 				channel->estsature = false;
-				for(char car : buffer)
+				for(char car : buffer) {
 					channel->buffer.push_front(car);
+					channels[chan]->pos++;
+				}
 				
 				glob_mtx.unlock();
 			}
@@ -567,6 +594,8 @@ void server_link(int fd) {
 				put<char>('P', out);
 				put<size_t>(chan, out);
 				put<size_t>(size, out);
+				put<size_t>(pos, out);
+				
 				for(char car : buffer)
 					put<char>(car, out);
 				
@@ -597,7 +626,7 @@ void worker(int num) {
 			mtx.unlock();
 			
 			// FIT SUCH THAT WE DOES NOT OVERFLOW OS'S socket-buffer-size !
-			if(rand() % 200 == 0) {
+			if(rand() % 50 == 0) {
 				if(est_serveur) {
 					if(outputs_clients.size() >= 2) {
 						int client = 1 + rand() % (outputs_clients.size() - 1);

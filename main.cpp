@@ -9,7 +9,7 @@ mutex m;
 /***************************************/
 
 namespace matrices {
-	const int P2 = 7;
+	const int P2 = 8;
 	const int SIZE = (1 << P2);
 
 	// randomly generate two matrixes of size SIZE
@@ -108,6 +108,7 @@ namespace matrices {
 
 	// Slow multiplication of two matrixes
 	void SlowMultiply(State* st) {
+		cerr << "SLOW" << endl;
 		size_t sz = get<size_t>("size", st);
 		size_t idA = pop<size_t>("mat_id", st);
 		size_t idB = pop<size_t>("mat_id", st);
@@ -200,7 +201,7 @@ namespace matrices {
 					
 					State* nst = new State({in}, {out}, Load);
 					push<void (*)(State*)>("f_ptr", Load, nst);
-					if(sz <= 16)
+					if(sz <= 64)
 						push<void (*)(State*)>("f_ptr", SlowMultiply, nst);
 					else
 						push<void (*)(State*)>("f_ptr", FastMultiply, nst);
@@ -311,6 +312,9 @@ namespace primes {
 			put<int>(value, state->outputs[0]);
 			put<int>("value", value + 1, state);
 		}
+		else {
+			state->continuation = nullptr;
+		}
 	}
 
 	void Filter(State* state) {
@@ -360,6 +364,57 @@ namespace primes {
 	}
 };
 
+size_t last_printed = 0;
+
+namespace dumb {
+	const int MAX_VALUE = 1000000;
+
+	void Output(State* state) {
+		if(get_ready<int>(state->inputs[0])) {
+			size_t val = get<int>(state->inputs[0]);
+			if(last_printed <= val) {
+				cout << val << endl;
+				last_printed = val;
+			}
+			else {
+				exit(-1);
+			}
+		}
+	}
+
+	void Dumb(State* state) {
+		if(get_ready<int>(state->inputs[0])) {
+			int val = get<int>(state->inputs[0]);
+			put<int>(val, state->outputs[0]);
+		}
+	}
+
+	void Integers(State* state) {
+		int value = get<int>("value", state);
+		
+		if(value <= MAX_VALUE) {
+			put<int>(value, state->outputs[0]);
+			put<int>("value", value + 1, state);
+		}
+		else {
+			state->continuation = nullptr;
+		}
+	}
+	
+	void dumb() {
+		size_t q1 = new_channel(), q2 = new_channel();
+		
+		State integers({}, {q1}, Integers);
+		put<int>("value", 0, &integers);
+		
+		doco(
+			integers,
+			State({q1}, {q2}, Dumb),
+			State({q2}, {}, Output)
+		);
+	}
+};
+
 vector<thread> threads;
 
 int main(int argc, char* argv[]) {
@@ -387,8 +442,8 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		primes::primes();
-		threads.push_back(thread(run, 4));
+		matrices::multiply();
+		threads.push_back(thread(run, 8));
 		
 		outputs_clients.push_back(nullptr);
 		
@@ -413,7 +468,7 @@ int main(int argc, char* argv[]) {
 		}
 		
 		threads.push_back(thread(server_link, fd));
-		run(4);
+		run(8);
 	}
 	return 0;
 }
