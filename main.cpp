@@ -442,7 +442,7 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		matrices::multiply();
+		primes::primes();
 		threads.push_back(thread(run, 8));
 		
 		outputs_clients.push_back(nullptr);
