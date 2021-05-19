@@ -3,9 +3,14 @@ Dans ce setup, nous avons implémenté une multiplication de matrices par divise
 L'architecture du réseau est constitué d'un serveur et de plusieurs clients.
 
 Pour créer une instance de serveur, il faut exécuter la commande :
+```shell
 PORT=8000 ./main serv
+```
+
 Pour exéctuer une instance de client, il faut exécuter la commande :
+```shell
 PORT=8000 ./main
+```
 
 (Par défaut, tout est exécuté en local, même si l'on peut l'exécuter sur plusieurs machines)
 
