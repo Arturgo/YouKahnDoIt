@@ -298,7 +298,7 @@ namespace matrices {
 /***************************************/
 
 namespace primes {
-	const int MAX_VALUE = 100000;
+	const int MAX_VALUE = 10000;
 	
 	void Output(State* state) {
 		if(get_ready<int>(state->inputs[0]))
@@ -442,7 +442,7 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		dumb::dumb();
+		primes::primes();
 		threads.push_back(thread(run, 8));
 		
 		outputs_clients.push_back(nullptr);
