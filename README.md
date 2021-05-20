@@ -4,15 +4,16 @@ L'architecture du réseau est constitué d'un serveur et de plusieurs clients.
 
 Pour créer une instance de serveur, il faut exécuter la commande :
 ```shell
-PORT=8000 ./main serv
+export PORT=8000;
+./main serv
 ```
 
 Pour exéctuer une instance de client, il faut exécuter la commande :
 ```shell
-PORT=8000 ./main
+export PORT=8000;
+export ADDR="127.0.0.1";
+./main
 ```
-
-(Par défaut, tout est exécuté en local, même si l'on peut l'exécuter sur plusieurs machines)
 
 Notre scheduleur est très basique et est aléatoire, une tâche est échangée entre le serveur et un client avec une certaine probabilité.
 Chaque tâche a son propre modèle de mémoire, stocké comme une map de listes doublement chainée d'octets.
