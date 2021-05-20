@@ -442,7 +442,7 @@ int main(int argc, char* argv[]) {
 			return -1;
 		}
 		
-		matrices::multiply();
+		dumb::dumb();
 		threads.push_back(thread(run, 8));
 		
 		outputs_clients.push_back(nullptr);
