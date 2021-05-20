@@ -460,7 +460,7 @@ int main(int argc, char* argv[]) {
 		
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_port = htons(port);
-		serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+		serv_addr.sin_addr.s_addr = inet_addr(getenv("ADDR"));
 		
 		if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
 			cerr << "SOCKET ERROR" << endl;
